@@ -1,0 +1,98 @@
+from flask import Flask, jsonify
+from flask_restful import Api, Resource, reqparse, abort, fields, marshal_with
+from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
+
+
+app = Flask(__name__)
+CORS(app)
+api = Api(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.tododb'
+tododb = SQLAlchemy(app)
+
+class TodoModel(tododb.Model):
+    id = tododb.Column(tododb.Integer, primary_key=True)
+    name = tododb.Column(tododb.String(20), nullable=False)
+    complete = tododb.Column(tododb.Boolean, nullable=False)
+
+tododb.create_all()
+
+task_put_args = reqparse.RequestParser()
+task_put_args.add_argument('name', type=str, help='Name of the task', required=True)
+task_put_args.add_argument('complete', type=bool, help='Complete?',required=True)
+
+task_update_args = reqparse.RequestParser()
+task_update_args.add_argument('name', type=str, help='Name of the task')
+task_update_args.add_argument('complete', type=bool, help='Complete?')
+
+resource_fields = {
+    'id': fields.Integer,
+    'name': fields.String,
+    'complete': fields.Boolean
+}
+
+
+class Todos(Resource):
+    @marshal_with(resource_fields)
+    def get(self):
+        result = TodoModel.query.all()
+        return result
+
+    @marshal_with(resource_fields)
+    def post(self):
+        args = task_put_args.parse_args()
+        task = TodoModel(name=args['name'], complete=args['complete'])
+        tododb.session.add(task)
+        tododb.session.commit()
+        return task
+
+
+class Todo(Resource):
+    @marshal_with(resource_fields)
+    def get(self, task_id):
+        result = TodoModel.query.filter_by(id=task_id).first()
+        if not result:
+            abort(404, message='Could not find task of this id')
+        return result
+
+    @marshal_with(resource_fields)
+    def put(self, task_id):
+        args = task_put_args.parse_args()
+
+        result = TodoModel.query.filter_by(id=task_id).first()
+        if result:
+            abort(409, message='Used task id')
+
+        task = TodoModel(id=task_id, name=args['name'], complete=args['complete'])
+        tododb.session.add(task)
+        tododb.session.commit()
+        return task, 201
+
+    @marshal_with(resource_fields)
+    def patch(self, task_id,):
+        args = task_put_args.parse_args()
+        result = TodoModel.query.filter_by(id=task_id).first()
+        if not result:
+            abort(404, message='Task nonexistent, cannot update')
+
+        if args['name']:
+            result.name = args['name']
+        if args['complete']:
+            result.complete = args['complete']
+
+        tododb.session.commit()
+
+        return result
+
+    @marshal_with(resource_fields)
+    def delete(self, task_id):
+        task = TodoModel.query.filter_by(id=task_id).first()
+        tododb.session.delete(task)
+        tododb.session.commit()
+        return '', 204
+
+api.add_resource(Todo, "/todos/<int:task_id>")
+api.add_resource(Todos, "/todos")
+
+if __name__ == "__main__":
+    app.run(debug = True)
